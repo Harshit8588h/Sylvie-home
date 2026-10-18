@@ -1,51 +1,116 @@
-# Sylvie — Local Dev Setup
+# Sylvie — Local Dev Setup (Zero → Running)
 
-This repo contains the Flutter source only. The platform-specific `android/` folder is generated locally (it is large and not worth committing).
+This guide is for someone who has **never used Flutter before**. Follow in order. Budget ~2 hours the first time.
 
-## Prerequisites
+## 0. What you need
 
-- Flutter SDK >= 3.22 (`flutter --version`)
-- Android Studio with Android SDK + an emulator OR a physical Android device with USB debugging
-- A Firebase project (we will create one — see "Firebase setup" below)
+- A laptop/PC (Windows 10/11 or macOS 12+)
+- 15 GB free disk
+- A stable internet connection (first install downloads ~5 GB)
+- An Android phone (your own first — test on it before touching family phones)
+- A USB cable (phone → PC)
 
-## First-time setup
+## 1. Install Flutter
+
+### Windows
+
+1. Download Flutter SDK zip: https://docs.flutter.dev/get-started/install/windows
+2. Extract to `C:\src\flutter` (NOT inside Program Files — permissions bite later)
+3. Add `C:\src\flutter\bin` to PATH:
+   - Start → "Edit the system environment variables" → Environment Variables → Path → Edit → New → paste `C:\src\flutter\bin` → OK everything
+4. Open a NEW PowerShell window and run:
+   ```
+   flutter --version
+   ```
+   Should show Flutter 3.x.x. If "not recognized" → PATH is not set right.
+
+### macOS
 
 ```bash
-# 1. Clone
-git clone <this-repo> sylvie
-cd sylvie
+# Easiest: Homebrew
+brew install --cask flutter
 
-# 2. Generate the Android platform folder (does not overwrite our lib/ or pubspec.yaml
-#    because we pass --platforms=android and the files already exist).
+# Verify
+flutter --version
+```
+
+## 2. Install Android Studio
+
+1. Download: https://developer.android.com/studio
+2. Install with defaults
+3. First launch → let it install the Android SDK (it will prompt you)
+4. In Android Studio: **More Actions → SDK Manager** → confirm these are installed:
+   - Android SDK Platform 34 (Android 14)
+   - Android SDK Platform-Tools
+   - Android SDK Command-line Tools
+5. In Android Studio: **More Actions → Plugins** → install **Flutter** plugin (also installs Dart plugin)
+
+## 3. Accept licenses + check setup
+
+```bash
+flutter doctor --android-licenses   # press y to each
+flutter doctor
+```
+
+`flutter doctor` should show green checks for:
+- Flutter
+- Android toolchain
+- Android Studio
+
+If any are red, click the exact URL it prints and fix that one thing.
+
+## 4. Enable Developer Mode on your phone
+
+1. Settings → About phone → tap **Build number** 7 times (you'll see "You are now a developer")
+2. Settings → System → Developer options → turn **USB debugging** ON
+3. Plug phone into PC with USB cable
+4. On the phone, allow the "Allow USB debugging?" prompt (tick "always allow from this computer")
+
+Verify:
+```bash
+flutter devices
+```
+Your phone should appear in the list.
+
+## 5. Clone this repo + run
+
+```bash
+# Clone
+git clone https://github.com/Harshit8588h/Sylvie-home.git sylvie
+cd sylvie
+git checkout claude/fervent-wozniak-5znji7
+
+# Generate the Android platform folder (does not overwrite our files)
 flutter create --project-name sylvie --org com.sylvie --platforms=android .
 
-# 3. Install Dart deps
+# Install Dart deps
 flutter pub get
 
-# 4. Run on a connected device/emulator
+# Run on your phone
 flutter run
 ```
 
-If `flutter create` complains about existing files, that is fine — it only writes the missing platform scaffolding.
+If `flutter run` succeeds you'll see the placeholder "Sylvie scaffold ready" screen on your phone. That means your dev setup is working — the rest is just adding code and re-running.
 
-## Firebase setup
+## 6. Build a release APK (for family phones)
 
-TODO (filled in once we decide which Google account owns the project).
-
-1. Create a Firebase project at console.firebase.google.com
-2. Add an Android app with package `com.sylvie.sylvie`
-3. Download `google-services.json` → place in `android/app/`
-4. Run `flutterfire configure` to generate `lib/firebase_options.dart`
-
-(Note: `google-services.json` and `firebase_options.dart` are gitignored.)
-
-## Running on a real phone
+Once we have the real app:
 
 ```bash
-# USB debugging on the phone, then:
-flutter devices        # confirm phone shows up
-flutter run            # debug build
-flutter build apk --release    # release APK for distribution to family
+flutter build apk --release
 ```
 
-The release APK will be at `build/app/outputs/flutter-apk/app-release.apk`. Side-load this to family phones.
+APK will be at `build/app/outputs/flutter-apk/app-release.apk`.
+
+Transfer this file to each family phone (WhatsApp, Google Drive, USB) and install. The phone will warn "Unknown source" — allow it from settings for one-time install.
+
+## 7. Firebase (do once, before Firestore wiring commit)
+
+See `docs/FIREBASE_SETUP.md`.
+
+## Troubleshooting
+
+- **`flutter devices` doesn't show my phone**: USB cable is a charging-only cable (common). Try another cable. Also check Developer options → USB debugging is still on.
+- **"gradle build failed" on first run**: usually `flutter doctor` has a red item you missed. Fix that, then `flutter clean && flutter pub get && flutter run`.
+- **Vivo/Oppo phone shows "Install blocked"**: Settings → Additional settings → Developer options → turn OFF "Verify apps over USB" and "Install via USB" ON.
+- **App installs but immediately closes on Vivo/Oppo/Xiaomi**: this is the aggressive-kill problem. Normal, we handle it in-app with the battery-setup wizard. Just open the app once more.
