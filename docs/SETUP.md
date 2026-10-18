@@ -1,116 +1,143 @@
-# Sylvie — Local Dev Setup (Zero → Running)
+# Sylvie — Local Dev Setup (Windows, Zero → Running)
 
-This guide is for someone who has **never used Flutter before**. Follow in order. Budget ~2 hours the first time.
+For someone who has never used Flutter. Follow in order. Budget ~2 hours the first time.
 
 ## 0. What you need
 
-- A laptop/PC (Windows 10/11 or macOS 12+)
-- 15 GB free disk
-- A stable internet connection (first install downloads ~5 GB)
-- An Android phone (your own first — test on it before touching family phones)
-- A USB cable (phone → PC)
+- Windows 10 or 11 (64-bit)
+- 15 GB free on your C: drive
+- Stable internet (first install downloads ~5 GB)
+- Your Android phone + USB cable
+- 2 hours (do it in one sitting; stopping halfway is painful)
 
-## 1. Install Flutter
+## 1. Install Git (if not already)
 
-### Windows
+1. Download: https://git-scm.com/download/win
+2. Install with defaults. Done.
 
-1. Download Flutter SDK zip: https://docs.flutter.dev/get-started/install/windows
-2. Extract to `C:\src\flutter` (NOT inside Program Files — permissions bite later)
-3. Add `C:\src\flutter\bin` to PATH:
-   - Start → "Edit the system environment variables" → Environment Variables → Path → Edit → New → paste `C:\src\flutter\bin` → OK everything
-4. Open a NEW PowerShell window and run:
+Verify in PowerShell:
+```
+git --version
+```
+
+## 2. Install Flutter SDK
+
+1. Download the latest **stable** Flutter zip: https://docs.flutter.dev/get-started/install/windows
+2. Create folder `C:\src` (right-click C: → New → Folder → `src`)
+3. Extract the zip there. End result: `C:\src\flutter\bin\flutter.bat` should exist.
+   - **IMPORTANT**: NOT inside `C:\Program Files` — Windows permission errors later.
+4. Add Flutter to PATH:
+   - Press Windows key, type `env`, open "Edit the system environment variables"
+   - Click **Environment Variables...**
+   - Under **User variables**, double-click **Path** → **New** → paste `C:\src\flutter\bin` → OK → OK → OK
+5. **Close every PowerShell window** and open a new one. Then:
    ```
    flutter --version
    ```
-   Should show Flutter 3.x.x. If "not recognized" → PATH is not set right.
+   Should print `Flutter 3.x.x`. If "not recognized" — PATH wasn't picked up. Reboot and try again.
 
-### macOS
-
-```bash
-# Easiest: Homebrew
-brew install --cask flutter
-
-# Verify
-flutter --version
-```
-
-## 2. Install Android Studio
+## 3. Install Android Studio
 
 1. Download: https://developer.android.com/studio
-2. Install with defaults
-3. First launch → let it install the Android SDK (it will prompt you)
-4. In Android Studio: **More Actions → SDK Manager** → confirm these are installed:
-   - Android SDK Platform 34 (Android 14)
-   - Android SDK Platform-Tools
-   - Android SDK Command-line Tools
-5. In Android Studio: **More Actions → Plugins** → install **Flutter** plugin (also installs Dart plugin)
+2. Install with defaults (big download, ~1 GB)
+3. First launch of Android Studio:
+   - It will offer to install the Android SDK — accept
+   - "Welcome to Android Studio" screen appears when done
+4. **More Actions → SDK Manager**:
+   - Tick: **Android 14 (API 34)** → Apply → accept license → wait
+   - Click the **SDK Tools** tab, tick:
+     - Android SDK Command-line Tools (latest)
+     - Android SDK Build-Tools 34
+     - Google Play services
+   - Apply → wait
+5. **More Actions → Plugins**:
+   - Search "Flutter" → Install → restart Android Studio when prompted
+   - (This also installs the Dart plugin automatically.)
 
-## 3. Accept licenses + check setup
+## 4. Accept SDK licenses
 
-```bash
-flutter doctor --android-licenses   # press y to each
+In PowerShell:
+```
+flutter doctor --android-licenses
+```
+Press `y` to every prompt.
+
+Then:
+```
 flutter doctor
 ```
-
-`flutter doctor` should show green checks for:
+You want green checks for:
 - Flutter
+- Windows version
 - Android toolchain
 - Android Studio
 
-If any are red, click the exact URL it prints and fix that one thing.
+Chrome/VS Code warnings can be ignored. Any **red** item — click the URL it prints and fix that one thing before continuing.
 
-## 4. Enable Developer Mode on your phone
+## 5. Enable USB debugging on your phone
 
-1. Settings → About phone → tap **Build number** 7 times (you'll see "You are now a developer")
-2. Settings → System → Developer options → turn **USB debugging** ON
+1. Settings → **About phone** → tap **Build number** 7 times (you'll see "You are now a developer")
+2. Settings → **System** → **Developer options** → turn **USB debugging** ON
 3. Plug phone into PC with USB cable
-4. On the phone, allow the "Allow USB debugging?" prompt (tick "always allow from this computer")
+4. On the phone, tap **Allow** on the "Allow USB debugging?" prompt (tick "always allow from this computer")
 
-Verify:
-```bash
+**For Vivo/Oppo/Realme/Xiaomi phones specifically** — also turn ON:
+- Developer options → **Install via USB** (ON)
+- Developer options → **USB debugging (Security settings)** (ON if present)
+- Developer options → **Disable permission monitoring** (ON if present)
+
+Verify in PowerShell:
+```
 flutter devices
 ```
-Your phone should appear in the list.
+Your phone must appear. If it doesn't:
+- Try another USB cable (many are charge-only)
+- `adb kill-server` then `adb start-server`
+- Unplug + replug phone
 
-## 5. Clone this repo + run
+## 6. Clone this repo and run
 
-```bash
-# Clone
+In PowerShell:
+```
+cd Desktop        # or wherever you want the project
 git clone https://github.com/Harshit8588h/Sylvie-home.git sylvie
 cd sylvie
 git checkout claude/fervent-wozniak-5znji7
 
-# Generate the Android platform folder (does not overwrite our files)
+# Generate the android/ folder (keeps our existing files)
 flutter create --project-name sylvie --org com.sylvie --platforms=android .
 
-# Install Dart deps
+# Install dependencies
 flutter pub get
 
 # Run on your phone
 flutter run
 ```
 
-If `flutter run` succeeds you'll see the placeholder "Sylvie scaffold ready" screen on your phone. That means your dev setup is working — the rest is just adding code and re-running.
+First build takes 3-5 minutes (Gradle downloads things). After that it's fast.
 
-## 6. Build a release APK (for family phones)
+**Success looks like:** phone shows a screen titled "Sylvie" with text "Sylvie scaffold ready."
 
-Once we have the real app:
+**Press `r` in PowerShell** to hot-reload after code changes. **Press `q`** to quit.
 
-```bash
+## 7. Build a release APK (for family phones, later)
+
+```
 flutter build apk --release
 ```
 
-APK will be at `build/app/outputs/flutter-apk/app-release.apk`.
+APK lands at `build\app\outputs\flutter-apk\app-release.apk`. Transfer via WhatsApp/Drive to each family phone and install.
 
-Transfer this file to each family phone (WhatsApp, Google Drive, USB) and install. The phone will warn "Unknown source" — allow it from settings for one-time install.
+## 8. Firebase
 
-## 7. Firebase (do once, before Firestore wiring commit)
+Separate guide: `docs/FIREBASE_SETUP.md`. Do this once after Flutter is working.
 
-See `docs/FIREBASE_SETUP.md`.
+---
 
-## Troubleshooting
+## Common Windows gotchas
 
-- **`flutter devices` doesn't show my phone**: USB cable is a charging-only cable (common). Try another cable. Also check Developer options → USB debugging is still on.
-- **"gradle build failed" on first run**: usually `flutter doctor` has a red item you missed. Fix that, then `flutter clean && flutter pub get && flutter run`.
-- **Vivo/Oppo phone shows "Install blocked"**: Settings → Additional settings → Developer options → turn OFF "Verify apps over USB" and "Install via USB" ON.
-- **App installs but immediately closes on Vivo/Oppo/Xiaomi**: this is the aggressive-kill problem. Normal, we handle it in-app with the battery-setup wizard. Just open the app once more.
+- **"Powershell execution policy" error** when running flutter: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` → `y`
+- **Gradle hangs on first build**: patience, it's downloading ~500 MB of Android build tools. Second build is instant.
+- **"CMake not found"**: SDK Manager → SDK Tools → tick NDK (side by side) and CMake → Apply
+- **Phone not detected**: install the OEM USB driver — for Vivo: https://www.vivo.com/in/support , for Xiaomi: https://en.miui.com/a-234.html , Samsung: Samsung USB Driver on their site. Pixel/OnePlus usually work without.
+- **Antivirus (Avast/Norton) killing flutter.bat**: add `C:\src\flutter` to its exclusion list.
