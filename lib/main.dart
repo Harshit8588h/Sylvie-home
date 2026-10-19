@@ -1,10 +1,19 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/auth_gate.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
+import 'firebase_options.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (DefaultFirebaseOptions.isConfigured) {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  }
+
   runApp(const ProviderScope(child: SylvieApp()));
 }
 
@@ -19,28 +28,7 @@ class SylvieApp extends StatelessWidget {
       darkTheme: SylvieTheme.dark(),
       themeMode: ThemeMode.system,
       debugShowCheckedModeBanner: false,
-      home: const _PlaceholderHome(),
-    );
-  }
-}
-
-class _PlaceholderHome extends StatelessWidget {
-  const _PlaceholderHome();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text(SylvieConstants.appName)),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Sylvie scaffold ready.\n\n'
-            'Next: Firebase wiring, auth, family setup, map, geofencing.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
+      home: const AuthGate(),
     );
   }
 }

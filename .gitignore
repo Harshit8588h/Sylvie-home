@@ -36,11 +36,14 @@ ios/Flutter/flutter_assets/
 ios/Flutter/flutter_export_environment.sh
 
 # Firebase secrets
+# NOTE: firebase_options.dart and firebase.json are safe to commit —
+# Firebase Android API keys are not secrets, they're protected by
+# Firestore security rules. google-services.json contains the same keys
+# but we keep it uncommitted so each dev downloads a fresh one from
+# the console and we don't have to rotate on repo access changes.
 google-services.json
 GoogleService-Info.plist
-firebase_options.dart
 .firebaserc
-firebase.json
 
 # OS
 .DS_Store
