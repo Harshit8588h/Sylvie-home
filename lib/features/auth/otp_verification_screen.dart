@@ -82,7 +82,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
           .authStateChanges()
           .firstWhere((u) => u != null)
           .timeout(const Duration(seconds: 30));
-      // Signed in — AuthGate will swap in the next screen; nothing to do.
+      // Signed in. AuthGate's home swap doesn't auto-pop routes that were
+      // pushed on top of it, so we clear the stack back to the AuthGate
+      // root ourselves — otherwise this OTP screen keeps showing on top
+      // of HomeShell with its spinner spinning forever.
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } on TimeoutException {
       if (mounted) {
         setState(() {
