@@ -77,5 +77,12 @@ service cloud.firestore {
       allow create, delete: if signedIn() &&
         isMember(request.resource.data.family_id);
     }
+
+    // Per-user index pointing at their family id. Each user may only
+    // read/write their own entry. Used by the client to look up the
+    // family they belong to without needing to know the id up front.
+    match /user_memberships/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
   }
 }

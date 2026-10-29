@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/phone_sign_in_screen.dart';
+import '../features/home/family_dashboard_screen.dart';
+import '../features/onboarding/create_or_join_screen.dart';
 import '../firebase_options.dart';
 import '../providers/auth_provider.dart';
+import '../providers/family_provider.dart';
 
-/// Routes based on Firebase + auth state:
-///   placeholder Firebase config → setup instructions
-///   signed out               → PhoneSignInScreen
-///   signed in                → placeholder home (family setup next commit)
+/// Top-level router. Decides which screen to show based on:
+///   1. Is Firebase actually configured? (placeholder sentinel vs real)
+///   2. Is a user signed in?
+///   3. Does the signed-in user have a family yet?
 class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
 
@@ -20,14 +23,47 @@ class AuthGate extends ConsumerWidget {
 
     final auth = ref.watch(authStateProvider);
     return auth.when(
-      loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
-      error: (e, _) => Scaffold(body: Center(child: Text('Auth error: $e'))),
+      loading: () => const _CenterSpinner(),
+      error: (e, _) => _CenterMessage('Auth error: $e'),
       data: (user) {
         if (user == null) return const PhoneSignInScreen();
-        return const _SignedInPlaceholder();
+        return const _MembershipGate();
       },
     );
   }
+}
+
+/// Signed in; decide between onboarding and dashboard based on membership.
+class _MembershipGate extends ConsumerWidget {
+  const _MembershipGate();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final familyIdAsync = ref.watch(currentFamilyIdProvider);
+    return familyIdAsync.when(
+      loading: () => const _CenterSpinner(),
+      error: (e, _) => _CenterMessage('Membership load error: $e'),
+      data: (familyId) {
+        if (familyId == null) return const CreateOrJoinScreen();
+        return const FamilyDashboardScreen();
+      },
+    );
+  }
+}
+
+class _CenterSpinner extends StatelessWidget {
+  const _CenterSpinner();
+  @override
+  Widget build(BuildContext context) =>
+      const Scaffold(body: Center(child: CircularProgressIndicator()));
+}
+
+class _CenterMessage extends StatelessWidget {
+  final String message;
+  const _CenterMessage(this.message);
+  @override
+  Widget build(BuildContext context) =>
+      Scaffold(body: Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(message))));
 }
 
 class _FirebaseNotConfiguredScreen extends StatelessWidget {
@@ -53,38 +89,6 @@ class _FirebaseNotConfiguredScreen extends StatelessWidget {
               '3. `google-services.json` ko android/app/ me daalo\n'
               '4. flutter run',
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SignedInPlaceholder extends ConsumerWidget {
-  const _SignedInPlaceholder();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(authStateProvider).valueOrNull;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sylvie'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () => ref.read(firebaseAuthProvider).signOut(),
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Signed in as ${user?.phoneNumber ?? "?"}'),
-            const SizedBox(height: 12),
-            const Text('Next: family setup wizard, map, geofencing.'),
           ],
         ),
       ),
