@@ -35,7 +35,7 @@ dependencies:
   # Device + OEM awareness
   device_info_plus: ^10.1.2
   battery_plus: ^6.0.2
-  app_settings: ^5.1.1
+  app_settings: ^9.0.0
 
   # Local storage + prefs
   shared_preferences: ^2.3.1
