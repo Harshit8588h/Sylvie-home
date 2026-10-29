@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/phone_sign_in_screen.dart';
-import '../features/home/family_dashboard_screen.dart';
+import '../features/home/home_shell.dart';
 import '../features/onboarding/create_or_join_screen.dart';
+import '../features/permissions/location_permissions_screen.dart';
 import '../firebase_options.dart';
 import '../providers/auth_provider.dart';
 import '../providers/family_provider.dart';
+import '../providers/location_provider.dart';
 
 /// Top-level router. Decides which screen to show based on:
-///   1. Is Firebase actually configured? (placeholder sentinel vs real)
+///   1. Is Firebase actually configured?
 ///   2. Is a user signed in?
 ///   3. Does the signed-in user have a family yet?
+///   4. Have they granted location permission?
 class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
 
@@ -33,7 +36,6 @@ class AuthGate extends ConsumerWidget {
   }
 }
 
-/// Signed in; decide between onboarding and dashboard based on membership.
 class _MembershipGate extends ConsumerWidget {
   const _MembershipGate();
 
@@ -45,9 +47,26 @@ class _MembershipGate extends ConsumerWidget {
       error: (e, _) => _CenterMessage('Membership load error: $e'),
       data: (familyId) {
         if (familyId == null) return const CreateOrJoinScreen();
-        return const FamilyDashboardScreen();
+        return const _PermissionGate();
       },
     );
+  }
+}
+
+class _PermissionGate extends ConsumerWidget {
+  const _PermissionGate();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final perm = ref.watch(locationPermissionProvider);
+    // We accept "while in use" as good enough to show the home shell —
+    // user can be nudged to upgrade to "always" later. Only denied/
+    // deniedForever blocks entry.
+    if (perm == LocationPermissionLevel.denied ||
+        perm == LocationPermissionLevel.deniedForever) {
+      return const LocationPermissionsScreen();
+    }
+    return const HomeShell();
   }
 }
 
@@ -62,8 +81,14 @@ class _CenterMessage extends StatelessWidget {
   final String message;
   const _CenterMessage(this.message);
   @override
-  Widget build(BuildContext context) =>
-      Scaffold(body: Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(message))));
+  Widget build(BuildContext context) => Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(message),
+          ),
+        ),
+      );
 }
 
 class _FirebaseNotConfiguredScreen extends StatelessWidget {
