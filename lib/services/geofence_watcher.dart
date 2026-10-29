@@ -8,82 +8,112 @@ import '../models/alert.dart';
 import '../models/family_member.dart' as mm;
 import '../models/safe_zone.dart';
 
-/// Foreground geofence watcher. Keeps an in-memory map of
-/// {zoneId → was-inside} and fires enter/exit alerts into Firestore when
-/// the current member crosses a boundary.
+/// Foreground geofence watcher that spans every group the user belongs to.
 ///
-/// This runs while the Flutter UI is alive; Phase 3 will add the OS-level
-/// geofence API so transitions still get caught when the app is killed.
+/// Maintains an in-memory {(groupId, zoneId) → was-inside} map; a crossing
+/// writes a FamilyAlert into the ORIGINATING group's /alerts collection so
+/// isolation is preserved — a zone exit in your Family group never leaks
+/// into your Friends group.
 class GeofenceWatcher {
   final FirebaseFirestore _db;
   final Map<String, bool> _insideState = {};
-  StreamSubscription<Position>? _sub;
+
+  // One zone subscription per group (added as groups come in, removed when
+  // the user leaves them).
+  final Map<String, StreamSubscription<List<SafeZone>>> _zoneSubs = {};
+  final Map<String, List<SafeZone>> _zonesByGroup = {};
+
+  StreamSubscription<Position>? _posSub;
+  StreamSubscription<List<String>>? _groupsSub;
+  String _uid = '';
 
   GeofenceWatcher(this._db);
 
   Future<void> start({
-    required String familyId,
     required String uid,
-    required Stream<List<SafeZone>> zonesStream,
+    required Stream<List<String>> groupIdsStream,
     required Stream<Position> positions,
   }) async {
     await stop();
+    _uid = uid;
 
-    // Keep the latest zone list in a mutable local so each position tick
-    // sees fresh data without rebuilding subscriptions.
-    List<SafeZone> currentZones = const [];
-    final zoneSub = zonesStream.listen((zs) {
-      currentZones = zs;
-      // Drop state for zones that no longer exist.
-      _insideState.removeWhere((id, _) => zs.every((z) => z.id != id));
-    });
+    _groupsSub = groupIdsStream.listen(_syncGroupSubscriptions);
 
-    _sub = positions.listen((pos) async {
-      for (final z in currentZones) {
-        if (!z.active) continue;
-        if (!z.appliesToMember(uid)) continue;
-
-        final inside = _isInside(pos, z);
-        final wasInside = _insideState[z.id];
-
-        if (wasInside == null) {
-          // First observation — just prime the state, no alert.
-          _insideState[z.id] = inside;
-          continue;
-        }
-
-        if (inside == wasInside) continue;
-
-        _insideState[z.id] = inside;
-
-        if (!inside && z.alertOnExit) {
-          await _writeAlert(
-            familyId: familyId,
-            memberId: uid,
-            zone: z,
-            pos: pos,
-            type: AlertType.zoneExit,
-          );
-        } else if (inside && z.alertOnEnter) {
-          await _writeAlert(
-            familyId: familyId,
-            memberId: uid,
-            zone: z,
-            pos: pos,
-            type: AlertType.zoneEnter,
-          );
-        }
-      }
-    });
-
-    // Keep the zone subscription alive as long as we are watching.
-    _sub!.onDone(zoneSub.cancel);
+    _posSub = positions.listen(_evaluate);
   }
 
   Future<void> stop() async {
-    await _sub?.cancel();
-    _sub = null;
+    await _posSub?.cancel();
+    await _groupsSub?.cancel();
+    for (final s in _zoneSubs.values) {
+      await s.cancel();
+    }
+    _posSub = null;
+    _groupsSub = null;
+    _zoneSubs.clear();
+    _zonesByGroup.clear();
     _insideState.clear();
+  }
+
+  void _syncGroupSubscriptions(List<String> ids) {
+    // Add subs for new groups.
+    for (final id in ids) {
+      if (_zoneSubs.containsKey(id)) continue;
+      final stream = _db
+          .collection('families')
+          .doc(id)
+          .collection('zones')
+          .snapshots()
+          .map((snap) => snap.docs
+              .map((d) => SafeZone.fromJson({...d.data(), 'id': d.id}))
+              .toList());
+      _zoneSubs[id] = stream.listen((zs) => _zonesByGroup[id] = zs);
+    }
+    // Drop subs for groups we no longer belong to.
+    final toRemove = _zoneSubs.keys.where((id) => !ids.contains(id)).toList();
+    for (final id in toRemove) {
+      _zoneSubs.remove(id)?.cancel();
+      _zonesByGroup.remove(id);
+      // Clear state entries for that group.
+      _insideState.removeWhere((key, _) => key.startsWith('$id|'));
+    }
+  }
+
+  void _evaluate(Position pos) {
+    for (final entry in _zonesByGroup.entries) {
+      final groupId = entry.key;
+      for (final z in entry.value) {
+        if (!z.active) continue;
+        if (!z.appliesToMember(_uid)) continue;
+
+        final key = '$groupId|${z.id}';
+        final inside = _isInside(pos, z);
+        final wasInside = _insideState[key];
+
+        if (wasInside == null) {
+          _insideState[key] = inside;
+          continue;
+        }
+        if (inside == wasInside) continue;
+        _insideState[key] = inside;
+
+        if (!inside && z.alertOnExit) {
+          unawaited(_writeAlert(
+            familyId: groupId,
+            zone: z,
+            pos: pos,
+            type: AlertType.zoneExit,
+          ));
+        } else if (inside && z.alertOnEnter) {
+          unawaited(_writeAlert(
+            familyId: groupId,
+            zone: z,
+            pos: pos,
+            type: AlertType.zoneEnter,
+          ));
+        }
+      }
+    }
   }
 
   bool _isInside(Position pos, SafeZone z) {
@@ -102,7 +132,7 @@ class GeofenceWatcher {
     double lat2,
     double lon2,
   ) {
-    const r = 6371000.0; // earth radius, meters
+    const r = 6371000.0;
     final dLat = _deg2rad(lat2 - lat1);
     final dLon = _deg2rad(lon2 - lon1);
     final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
@@ -118,7 +148,6 @@ class GeofenceWatcher {
 
   Future<void> _writeAlert({
     required String familyId,
-    required String memberId,
     required SafeZone zone,
     required Position pos,
     required AlertType type,
@@ -130,7 +159,7 @@ class GeofenceWatcher {
         .doc();
     final alert = FamilyAlert(
       id: alertRef.id,
-      memberId: memberId,
+      memberId: _uid,
       type: type,
       timestamp: DateTime.now().toUtc(),
       location: mm.LatLng(pos.latitude, pos.longitude),
@@ -140,7 +169,7 @@ class GeofenceWatcher {
     try {
       await alertRef.set(alert.toJson());
     } catch (_) {
-      // Network blip — skip; the next transition will produce a fresh alert.
+      // Blip — next transition will retry.
     }
   }
 }

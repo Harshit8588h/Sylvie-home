@@ -8,111 +8,122 @@ import '../data/alert_repository.dart';
 import '../data/presence_repository.dart';
 import '../models/alert.dart';
 
-/// Periodically checks for two cross-cutting conditions:
-///   1. A family member's presence doc hasn't updated in >15 min
-///      → their phone is probably offline / app killed / out of coverage
-///   2. The local device's battery dropped below 20%
-///      → warn family once per crossing
+/// Periodically checks:
+///   1. For each group the user is in, any OTHER member whose presence
+///      doc is older than 15 min → phoneOffline alert in that group
+///   2. Local device battery < 20 % → batteryLow alert in every group
+///      (friends want to know, so does family)
 ///
-/// Alerts are fired at most once per event with simple in-memory
-/// hysteresis so we don't spam the alerts collection every tick.
+/// In-memory hysteresis prevents spam: an alert fires once per
+/// (group, memberId, condition) crossing and re-arms when the condition
+/// clears.
 class WatchdogService {
   final AlertRepository _alerts;
   final PresenceRepository _presence;
   final FirebaseFirestore _db;
   final Battery _battery;
 
-  final Set<String> _alertedOffline = <String>{};
-  bool _alertedLowBattery = false;
+  final Set<String> _alertedOffline = <String>{}; // "groupId|memberId"
+  final Set<String> _alertedBattery = <String>{}; // "groupId"
 
   Timer? _timer;
+  StreamSubscription<List<String>>? _groupsSub;
+  List<String> _currentGroups = const [];
+  String _uid = '';
 
   WatchdogService(this._alerts, this._presence, this._db, {Battery? battery})
       : _battery = battery ?? Battery();
 
-  Future<void> start({required String familyId, required String uid}) async {
+  Future<void> start({
+    required Stream<List<String>> groupIdsStream,
+    required String uid,
+  }) async {
     await stop();
-    _timer = Timer.periodic(
-      const Duration(minutes: 2),
-      (_) => _tick(familyId: familyId, uid: uid),
-    );
-    // Also run once immediately so the first alert fires fast.
-    unawaited(_tick(familyId: familyId, uid: uid));
+    _uid = uid;
+    _groupsSub = groupIdsStream.listen((ids) {
+      _currentGroups = ids;
+      // Drop memos for groups the user is no longer in.
+      _alertedOffline.removeWhere((k) => !ids.contains(k.split('|').first));
+      _alertedBattery.removeWhere((g) => !ids.contains(g));
+    });
+
+    _timer = Timer.periodic(const Duration(minutes: 2), (_) => _tick());
+    unawaited(_tick());
   }
 
   Future<void> stop() async {
     _timer?.cancel();
+    await _groupsSub?.cancel();
     _timer = null;
+    _groupsSub = null;
     _alertedOffline.clear();
-    _alertedLowBattery = false;
+    _alertedBattery.clear();
+    _currentGroups = const [];
   }
 
-  Future<void> _tick({
-    required String familyId,
-    required String uid,
-  }) async {
-    await _checkBattery(familyId: familyId, uid: uid);
-    await _checkOffline(familyId: familyId, uid: uid);
+  Future<void> _tick() async {
+    if (_currentGroups.isEmpty) return;
+    await _checkBattery();
+    await _checkOffline();
   }
 
-  Future<void> _checkBattery({
-    required String familyId,
-    required String uid,
-  }) async {
+  Future<void> _checkBattery() async {
+    int level;
     try {
-      final level = await _battery.batteryLevel;
-      if (level < SylvieConstants.lowBatteryThreshold && !_alertedLowBattery) {
-        _alertedLowBattery = true;
-        await _alerts.createAlert(
-          familyId: familyId,
-          alert: _mkAlert(uid: uid, type: AlertType.batteryLow),
-        );
-      } else if (level > SylvieConstants.lowBatteryThreshold + 5) {
-        // Hysteresis: only re-arm once we're comfortably above the threshold.
-        _alertedLowBattery = false;
-      }
+      level = await _battery.batteryLevel;
     } catch (_) {
-      // Battery plugin can fail on some OEMs — ignore and try next tick.
+      return;
+    }
+    final lowNow = level < SylvieConstants.lowBatteryThreshold;
+    final recoveredNow = level > SylvieConstants.lowBatteryThreshold + 5;
+
+    for (final gid in _currentGroups) {
+      if (lowNow && !_alertedBattery.contains(gid)) {
+        _alertedBattery.add(gid);
+        await _alerts.createAlert(
+          familyId: gid,
+          alert: _mkAlert(uid: _uid, type: AlertType.batteryLow),
+        );
+      } else if (recoveredNow) {
+        _alertedBattery.remove(gid);
+      }
     }
   }
 
-  Future<void> _checkOffline({
-    required String familyId,
-    required String uid,
-  }) async {
-    try {
-      final snap = await _db
-          .collection('families')
-          .doc(familyId)
-          .collection('presence')
-          .get();
+  Future<void> _checkOffline() async {
+    final now = DateTime.now().toUtc();
+    final threshold = SylvieConstants.phoneOfflineThreshold;
 
-      final now = DateTime.now().toUtc();
-      final threshold = SylvieConstants.phoneOfflineThreshold;
+    for (final gid in _currentGroups) {
+      try {
+        final snap = await _db
+            .collection('families')
+            .doc(gid)
+            .collection('presence')
+            .get();
 
-      for (final d in snap.docs) {
-        if (d.id == uid) continue; // don't alert about yourself
-
-        try {
-          final ts = DateTime.parse(d.data()['timestamp'] as String);
-          final age = now.difference(ts);
-          final isOffline = age > threshold;
-
-          if (isOffline && !_alertedOffline.contains(d.id)) {
-            _alertedOffline.add(d.id);
-            await _alerts.createAlert(
-              familyId: familyId,
-              alert: _mkAlert(uid: d.id, type: AlertType.phoneOffline),
-            );
-          } else if (!isOffline) {
-            _alertedOffline.remove(d.id);
+        for (final d in snap.docs) {
+          if (d.id == _uid) continue;
+          try {
+            final ts = DateTime.parse(d.data()['timestamp'] as String);
+            final isOffline = now.difference(ts) > threshold;
+            final key = '$gid|${d.id}';
+            if (isOffline && !_alertedOffline.contains(key)) {
+              _alertedOffline.add(key);
+              await _alerts.createAlert(
+                familyId: gid,
+                alert: _mkAlert(uid: d.id, type: AlertType.phoneOffline),
+              );
+            } else if (!isOffline) {
+              _alertedOffline.remove(key);
+            }
+          } catch (_) {
+            continue;
           }
-        } catch (_) {
-          continue;
         }
+      } catch (_) {
+        // Firestore blip — next tick.
       }
-    } catch (_) {
-      // Firestore blip — try next tick.
     }
   }
 

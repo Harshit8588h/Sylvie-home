@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/family_member.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
+import '../../providers/preferences_provider.dart';
 import '../../services/oem_detector.dart';
 import 'profile_fields.dart';
 
@@ -65,6 +66,9 @@ class _JoinFamilyScreenState extends ConsumerState<JoinFamilyScreen> {
       );
 
       await repo.joinFamily(familyId: familyId, member: member);
+
+      // Make this freshly joined group the active one.
+      await ref.read(activeGroupPrefProvider.notifier).set(familyId);
 
       if (mounted) Navigator.of(context).pop();
     } catch (e) {

@@ -8,6 +8,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
 import '../../providers/presence_provider.dart';
 import '../settings/settings_screen.dart';
+import 'group_switcher.dart';
 
 class FamilyDashboardScreen extends ConsumerWidget {
   const FamilyDashboardScreen({super.key});
@@ -19,11 +20,31 @@ class FamilyDashboardScreen extends ConsumerWidget {
     final codes = ref.watch(familyInviteCodesProvider).valueOrNull ?? const [];
     final presence = ref.watch(familyPresenceProvider).valueOrNull ?? const {};
     final uid = ref.watch(currentUidProvider);
-    final isAdmin = family != null && family.adminId == uid;
+    final me = members.where((m) => m.id == uid).firstOrNull;
+    final iAmAdmin = me?.role == FamilyRole.admin;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(family?.name ?? 'Sylvie'),
+        title: InkWell(
+          onTap: () => showGroupSwitcher(context),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    family?.name ?? 'Sylvie',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
@@ -37,7 +58,7 @@ class FamilyDashboardScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (isAdmin && codes.isNotEmpty) _InviteCard(code: codes.first),
+          if (iAmAdmin && codes.isNotEmpty) _InviteCard(code: codes.first),
           const SizedBox(height: 16),
           Text(
             'Members (${members.length})',
@@ -49,6 +70,7 @@ class FamilyDashboardScreen extends ConsumerWidget {
               member: m,
               isSelf: m.id == uid,
               presence: presence[m.id],
+              iAmAdmin: iAmAdmin,
             ),
           ),
         ],
@@ -106,7 +128,7 @@ class _InviteCard extends StatelessWidget {
                   tooltip: 'Share',
                   onPressed: () async {
                     final text =
-                        'Sylvie family mein join ho: invite code $code';
+                        'Sylvie group mein join ho: invite code $code';
                     final uri =
                         Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
                     if (await canLaunchUrl(uri)) await launchUrl(uri);
@@ -116,7 +138,7 @@ class _InviteCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Family members ko ye code bhej — WhatsApp pe share kar sakte ho.',
+              'Yeh code sirf is group ke liye hai. Jisko bulao WhatsApp pe bhej do.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -126,18 +148,20 @@ class _InviteCard extends StatelessWidget {
   }
 }
 
-class _MemberTile extends StatelessWidget {
+class _MemberTile extends ConsumerWidget {
   final FamilyMember member;
   final bool isSelf;
   final LastLocation? presence;
+  final bool iAmAdmin;
   const _MemberTile({
     required this.member,
     required this.isSelf,
     required this.presence,
+    required this.iAmAdmin,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Card(
       child: ListTile(
         leading: CircleAvatar(
@@ -187,6 +211,12 @@ class _MemberTile extends StatelessWidget {
                         'https://wa.me/${member.phoneNumber.replaceAll('+', '')}',
                       ),
                     ),
+                    if (iAmAdmin)
+                      _ActionIconButton(
+                        icon: Icons.more_horiz,
+                        label: 'Admin',
+                        onTap: () => _showAdminActions(context, ref),
+                      ),
                   ],
                 ),
               ),
@@ -201,6 +231,81 @@ class _MemberTile extends StatelessWidget {
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _showAdminActions(BuildContext context, WidgetRef ref) async {
+    final familyId = ref.read(activeGroupIdProvider);
+    if (familyId == null) return;
+    final isAdmin = member.role == FamilyRole.admin;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                isAdmin ? Icons.remove_moderator : Icons.admin_panel_settings,
+              ),
+              title: Text(isAdmin ? 'Admin se hatao' : 'Admin banao'),
+              onTap: () => Navigator.of(context).pop('toggle_admin'),
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.person_remove,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                'Group se remove karo',
+                style:
+                    TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              onTap: () => Navigator.of(context).pop('remove'),
+            ),
+            const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    final repo = ref.read(familyRepositoryProvider);
+    switch (choice) {
+      case 'toggle_admin':
+        await repo.setMemberRole(
+          familyId: familyId,
+          memberId: member.id,
+          asAdmin: !isAdmin,
+        );
+      case 'remove':
+        if (context.mounted) {
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: Text('${member.name} ko remove karo?'),
+              content: Text(
+                'Yeh user is group se nikal jaayega. Unki location is '
+                'group pe nahi dikhegi aur alerts band ho jaayenge. '
+                'Dusre groups se nahi hatega.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Remove'),
+                ),
+              ],
+            ),
+          );
+          if (ok == true) {
+            await repo.removeMember(familyId: familyId, memberId: member.id);
+          }
+        }
     }
   }
 

@@ -1,20 +1,25 @@
 rules_version = '2';
 
-// Sylvie family data model:
+// Sylvie data model (multi-group aware):
 //   /families/{familyId}
-//     members/{uid}        — one doc per family member
+//     members/{uid}        — one doc per member (role: 'admin' | 'member')
 //     zones/{zoneId}       — safe zones
 //     alerts/{alertId}     — exit/enter/offline alerts
-//     presence/{uid}       — latest location + battery, one doc per member
+//     presence/{uid}       — latest location + battery
 //   /invites/{code}        — short-lived join codes → familyId
+//   /user_memberships/{uid}
+//     { group_ids: [familyId, ...] }  — every group the user belongs to
 //
 // Rules:
-//   - everything requires auth
-//   - a user may only read/write their own family's data
-//   - a user may only overwrite their OWN presence/member doc
-//   - only the admin may delete the family or remove members
-//   - invites are world-readable (so a joiner can look up their code)
-//     but only the creating family may write them
+//   - every operation requires auth
+//   - a user may only read/write within families they are a member of
+//     (membership derived from the per-family /members/{uid} doc existing)
+//   - admin == member doc with role == 'admin' (multi-admin supported)
+//   - a user may only overwrite their OWN presence / member doc
+//   - only an admin may remove members or delete the group
+//   - invites are world-readable (so a joiner can look up a code) but
+//     only group members may create them
+//   - /user_memberships/{uid} is strictly self-owned
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -30,57 +35,59 @@ service cloud.firestore {
 
     function isAdmin(familyId) {
       return isMember(familyId) &&
-        get(/databases/$(database)/documents/families/$(familyId)).data.admin_id == request.auth.uid;
+        get(/databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)).data.role == 'admin';
     }
 
     match /families/{familyId} {
       allow read: if isMember(familyId);
-      // Creating a family: only you can set yourself as admin.
+      // Creating a family: the creator must be setting themselves as admin
+      // (admin_id lingers on the family doc as the original creator; the
+      // live admin check is via the member doc's role field).
       allow create: if signedIn() && request.resource.data.admin_id == request.auth.uid;
       allow update: if isAdmin(familyId);
       allow delete: if isAdmin(familyId);
 
       match /members/{memberId} {
         allow read: if isMember(familyId);
-        // You can create/update your own member doc; admin can edit anyone.
+        // You can create/update your own member doc; any admin can edit anyone.
         allow create, update: if signedIn() &&
           (request.auth.uid == memberId || isAdmin(familyId));
-        allow delete: if isAdmin(familyId);
+        // Members may delete their own doc (leave group); admin may delete
+        // anyone's (kick / remove).
+        allow delete: if signedIn() &&
+          (request.auth.uid == memberId || isAdmin(familyId));
       }
 
       match /zones/{zoneId} {
         allow read: if isMember(familyId);
-        // For now any member can add zones; tighten to admin-only later if needed.
-        allow create, update, delete: if isMember(familyId);
+        // Any admin can create/update/delete zones (opened up from the
+        // previous "any member" rule now that we have real roles).
+        allow create, update, delete: if isAdmin(familyId);
       }
 
       match /alerts/{alertId} {
         allow read: if isMember(familyId);
         allow create: if isMember(familyId);
-        // Members can mark an alert as acknowledged/resolved.
         allow update: if isMember(familyId);
         allow delete: if isAdmin(familyId);
       }
 
       match /presence/{uid} {
         allow read: if isMember(familyId);
-        // Only you can write your own presence doc.
+        // Only you can write your own presence doc; admin can delete it
+        // when removing a member.
         allow write: if signedIn() && request.auth.uid == uid && isMember(familyId);
+        allow delete: if signedIn() &&
+          (request.auth.uid == uid || isAdmin(familyId));
       }
     }
 
     match /invites/{code} {
-      // A joiner (not yet in the family) must be able to read the code
-      // to discover which family it belongs to.
       allow read: if signedIn();
-      // Only members of the target family may create/delete invite codes.
       allow create, delete: if signedIn() &&
         isMember(request.resource.data.family_id);
     }
 
-    // Per-user index pointing at their family id. Each user may only
-    // read/write their own entry. Used by the client to look up the
-    // family they belong to without needing to know the id up front.
     match /user_memberships/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }

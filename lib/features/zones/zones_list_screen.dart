@@ -13,11 +13,12 @@ class ZonesListScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final family = ref.watch(currentFamilyProvider).valueOrNull;
     final uid = ref.watch(currentUidProvider);
-    final isAdmin = family != null && family.adminId == uid;
     final zones = ref.watch(zonesProvider).valueOrNull ?? const [];
     final members = ref.watch(familyMembersProvider).valueOrNull ?? const [];
+    // Multi-admin: role lives on the member doc, not family.admin_id.
+    final me = members.where((m) => m.id == uid).firstOrNull;
+    final isAdmin = me?.role == mm.FamilyRole.admin;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Safe zones')),

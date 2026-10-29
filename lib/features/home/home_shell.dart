@@ -6,7 +6,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
 import '../../providers/location_provider.dart';
 import '../../providers/service_providers.dart';
-import '../../providers/zone_provider.dart';
 import '../alerts/alerts_screen.dart';
 import '../map/map_screen.dart';
 import '../zones/zones_list_screen.dart';
@@ -15,8 +14,11 @@ import 'family_dashboard_screen.dart';
 /// Family / Map / Zones / Alerts tabs. Also the single place where every
 /// background service gets started once we have:
 ///   - a signed-in user with a uid
-///   - a family id in /user_memberships/{uid}
+///   - at least one group id in /user_memberships/{uid}
 ///   - any location permission
+///
+/// Services now take the full group-id stream so a user who belongs to
+/// multiple groups is tracked and watched across all of them.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -32,7 +34,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final uid = ref.watch(currentUidProvider);
-    final familyId = ref.watch(currentFamilyIdProvider).valueOrNull;
+    final groupIds = ref.watch(userGroupIdsProvider).valueOrNull ?? const [];
     final perm = ref.watch(locationPermissionProvider);
 
     final hasPerm = perm == LocationPermissionLevel.whileInUse ||
@@ -40,20 +42,15 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     if (!_servicesStarted &&
         uid != null &&
-        familyId != null &&
+        groupIds.isNotEmpty &&
         hasPerm) {
       _servicesStarted = true;
-      _startServices(familyId: familyId, uid: uid);
+      _startServices(uid: uid);
     }
 
-    // Notification firing: watch the alerts stream and show a system
-    // notification for any alert id we haven't seen before. On the first
-    // emission after a cold start we only prime the baseline so stale
-    // alerts don't all pop at once.
     ref.listen(alertsProvider, (prev, next) {
       final alerts = next.valueOrNull;
       if (alerts == null) return;
-
       if (_seenAlertIds == null) {
         _seenAlertIds = alerts.map((a) => a.id).toSet();
         return;
@@ -117,30 +114,31 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
   }
 
-  Future<void> _startServices({
-    required String familyId,
-    required String uid,
-  }) async {
+  Future<void> _startServices({required String uid}) async {
+    // Riverpod gives us a Stream<List<String>> of group ids via the
+    // underlying provider's stream API.
+    final groupsStream = ref.read(userGroupIdsProvider.stream);
+
     final location = ref.read(locationServiceProvider);
-    await location.start(familyId: familyId, uid: uid);
+    await location.start(groupIdsStream: groupsStream, uid: uid);
 
     final watcher = ref.read(geofenceWatcherProvider);
     await watcher.start(
-      familyId: familyId,
       uid: uid,
-      zonesStream:
-          ref.read(zoneRepositoryProvider).watchZones(familyId),
+      groupIdsStream: groupsStream,
       positions: location.positions,
     );
 
     final watchdog = ref.read(watchdogServiceProvider);
-    await watchdog.start(familyId: familyId, uid: uid);
+    await watchdog.start(groupIdsStream: groupsStream, uid: uid);
 
-    // Register FCM token on member doc — unused in Phase 4 (we rely on
-    // local notifications) but future Cloud Functions can push to killed
-    // apps without a schema change.
+    // FCM — register token in whichever groups the user is in right now.
+    // Group changes beyond this point rely on the token already being
+    // written when a joinFamily call ran.
+    final currentIds =
+        ref.read(userGroupIdsProvider).valueOrNull ?? const <String>[];
     await ref
         .read(fcmServiceProvider)
-        .registerFor(familyId: familyId, uid: uid);
+        .registerFor(familyIds: currentIds, uid: uid);
   }
 }

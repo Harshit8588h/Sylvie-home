@@ -2,10 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Thin wrapper around SharedPreferences for first-run flags, trip mode,
-/// and other per-device settings. Everything surfaced through Riverpod so
-/// screens can react to changes without manually threading callbacks.
+/// active-group choice, and other per-device settings. Everything surfaced
+/// through Riverpod so screens can react to changes without manually
+/// threading callbacks.
 
 const _kBatterySetupDone = 'battery_setup_done';
+const _kActiveGroupId = 'active_group_id';
 
 final sharedPrefsProvider = FutureProvider<SharedPreferences>((_) async {
   return SharedPreferences.getInstance();
@@ -40,4 +42,34 @@ class BatterySetupController extends StateNotifier<bool> {
 final batterySetupDoneProvider =
     StateNotifierProvider<BatterySetupController, bool>(
   (ref) => BatterySetupController(ref),
+);
+
+/// The group id the user currently has open. Persisted per-device so a
+/// re-launch returns to the same group. null = either not loaded yet or
+/// no explicit choice (callers fall back to the first known membership).
+class ActiveGroupController extends StateNotifier<String?> {
+  final Ref _ref;
+  ActiveGroupController(this._ref) : super(null) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await _ref.read(sharedPrefsProvider.future);
+    state = prefs.getString(_kActiveGroupId);
+  }
+
+  Future<void> set(String? id) async {
+    final prefs = await _ref.read(sharedPrefsProvider.future);
+    if (id == null) {
+      await prefs.remove(_kActiveGroupId);
+    } else {
+      await prefs.setString(_kActiveGroupId, id);
+    }
+    state = id;
+  }
+}
+
+final activeGroupPrefProvider =
+    StateNotifierProvider<ActiveGroupController, String?>(
+  (ref) => ActiveGroupController(ref),
 );

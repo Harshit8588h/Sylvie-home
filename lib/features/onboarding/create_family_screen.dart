@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/family_member.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
+import '../../providers/preferences_provider.dart';
 import '../../services/oem_detector.dart';
 import 'profile_fields.dart';
 
@@ -52,12 +53,18 @@ class _CreateFamilyScreenState extends ConsumerState<CreateFamilyScreen> {
         createdAt: DateTime.now().toUtc(),
       );
 
-      await ref.read(familyRepositoryProvider).createFamily(
+      final result = await ref.read(familyRepositoryProvider).createFamily(
             name: _familyNameController.text.trim(),
             adminMember: member,
           );
 
-      // currentFamilyIdProvider will flip; AuthGate routes us to dashboard.
+      // Switch to the newly created group so the UI shows it right away
+      // (otherwise the active-group fallback would stick on the previous
+      // group when creating a second circle).
+      await ref
+          .read(activeGroupPrefProvider.notifier)
+          .set(result.familyId);
+
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {

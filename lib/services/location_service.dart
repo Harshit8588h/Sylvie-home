@@ -7,8 +7,10 @@ import '../core/constants.dart';
 import '../data/presence_repository.dart';
 import '../models/family_member.dart';
 
-/// Streams location updates from the device and pushes them to Firestore.
-/// Runs as long as [start] is called with a valid familyId + uid.
+/// Streams location updates from the device and pushes them to every group
+/// the user currently belongs to. Each push writes
+/// /families/{groupId}/presence/{uid} — same shape per group — so a user
+/// visible across multiple circles has a fresh presence doc in each one.
 ///
 /// Exposes [positions] so peers (GeofenceWatcher) can subscribe to the
 /// same stream instead of opening a second geolocator subscription.
@@ -20,17 +22,35 @@ class LocationService {
       StreamController<Position>.broadcast();
 
   StreamSubscription<Position>? _posSub;
+  StreamSubscription<List<String>>? _groupsSub;
   Timer? _heartbeat;
   Position? _lastPushed;
+
+  /// Snapshot of groups to write presence into. Rewritten when the
+  /// upstream groupIds stream emits.
+  List<String> _currentGroups = const [];
+  String _uid = '';
 
   LocationService(this._presence, {Battery? battery})
       : _battery = battery ?? Battery();
 
-  /// Broadcast stream of raw position updates. Multiple consumers are fine.
   Stream<Position> get positions => _positions.stream;
 
-  Future<void> start({required String familyId, required String uid}) async {
+  /// Start writing presence for every group id emitted by [groupIdsStream].
+  Future<void> start({
+    required Stream<List<String>> groupIdsStream,
+    required String uid,
+  }) async {
     await stop();
+    _uid = uid;
+
+    _groupsSub = groupIdsStream.listen((ids) {
+      _currentGroups = ids;
+      // Push immediately on group-list change so a newly joined group has
+      // a presence doc without waiting for the next movement.
+      final pos = _lastPushed;
+      if (pos != null) unawaited(_push(pos));
+    });
 
     _posSub = Geolocator.getPositionStream(
       locationSettings: LocationSettings(
@@ -38,28 +58,31 @@ class LocationService {
         distanceFilter: SylvieConstants.locationUpdateDistanceMeters.toInt(),
       ),
     ).listen((pos) {
-      _positions.add(pos); // fan out to geofence watcher etc.
-      _push(familyId: familyId, uid: uid, pos: pos);
+      _positions.add(pos);
+      unawaited(_push(pos));
     });
 
     _heartbeat = Timer.periodic(const Duration(minutes: 10), (_) async {
       final pos = _lastPushed ?? await _tryCurrent();
-      if (pos != null) await _push(familyId: familyId, uid: uid, pos: pos);
+      if (pos != null) await _push(pos);
     });
 
     final first = await _tryCurrent();
     if (first != null) {
       _positions.add(first);
-      await _push(familyId: familyId, uid: uid, pos: first);
+      await _push(first);
     }
   }
 
   Future<void> stop() async {
     await _posSub?.cancel();
+    await _groupsSub?.cancel();
     _heartbeat?.cancel();
     _posSub = null;
+    _groupsSub = null;
     _heartbeat = null;
     _lastPushed = null;
+    _currentGroups = const [];
   }
 
   Future<Position?> _tryCurrent() async {
@@ -72,11 +95,8 @@ class LocationService {
     }
   }
 
-  Future<void> _push({
-    required String familyId,
-    required String uid,
-    required Position pos,
-  }) async {
+  Future<void> _push(Position pos) async {
+    if (_currentGroups.isEmpty) return;
     int battery;
     try {
       battery = await _battery.batteryLevel;
@@ -93,15 +113,17 @@ class LocationService {
       isMoving: isMoving,
     );
 
-    try {
-      await _presence.updatePresence(
-        familyId: familyId,
-        uid: uid,
-        location: location,
-      );
-      _lastPushed = pos;
-    } catch (_) {
-      // Network blip — the next tick will retry.
+    for (final gid in _currentGroups) {
+      try {
+        await _presence.updatePresence(
+          familyId: gid,
+          uid: _uid,
+          location: location,
+        );
+      } catch (_) {
+        // Per-group blip — the next tick will retry.
+      }
     }
+    _lastPushed = pos;
   }
 }
