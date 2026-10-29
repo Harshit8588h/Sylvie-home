@@ -6,6 +6,7 @@ import 'core/auth_gate.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'firebase_options.dart';
+import 'services/notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,6 +14,10 @@ Future<void> main() async {
   if (DefaultFirebaseOptions.isConfigured) {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   }
+
+  // Local notifications channel + runtime permission (Android 13+).
+  // Safe to await even when Firebase is not yet configured.
+  await NotificationService().init();
 
   runApp(const ProviderScope(child: SylvieApp()));
 }
