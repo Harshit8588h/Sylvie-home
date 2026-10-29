@@ -1,4 +1,6 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+// riverpod exports a type named `Family` (used internally for provider
+// families). Hide it so our own `Family` model wins unambiguously here.
+import 'package:flutter_riverpod/flutter_riverpod.dart' hide Family;
 
 import '../data/family_repository.dart';
 import '../models/family.dart';
