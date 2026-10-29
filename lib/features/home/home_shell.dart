@@ -5,10 +5,11 @@ import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
 import '../../providers/location_provider.dart';
 import '../map/map_screen.dart';
+import '../zones/zones_list_screen.dart';
 import 'family_dashboard_screen.dart';
 
-/// Wraps Dashboard + Map in bottom-nav scaffolding. Also kicks off the
-/// location service once the user has a family + the right permission.
+/// Wraps Family / Map / Zones in bottom-nav scaffolding. Also kicks off
+/// the location service once we have a family + any location permission.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -26,14 +27,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final familyId = ref.watch(currentFamilyIdProvider).valueOrNull;
     final perm = ref.watch(locationPermissionProvider);
 
-    // Start location updates once we have a family + any location permission.
-    // Phase 1 runs while the UI is alive; Phase 2 will promote to a true
-    // Android foreground service.
     final hasPerm = perm == LocationPermissionLevel.whileInUse ||
         perm == LocationPermissionLevel.always;
     if (!_serviceStarted && uid != null && familyId != null && hasPerm) {
       _serviceStarted = true;
-      // Fire-and-forget; service manages its own lifecycle.
       ref
           .read(locationServiceProvider)
           .start(familyId: familyId, uid: uid);
@@ -45,6 +42,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         children: const [
           FamilyDashboardScreen(),
           MapScreen(),
+          ZonesListScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -60,6 +58,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
             label: 'Map',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.shield_outlined),
+            selectedIcon: Icon(Icons.shield),
+            label: 'Zones',
           ),
         ],
       ),

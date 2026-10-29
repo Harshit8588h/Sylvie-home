@@ -5,11 +5,14 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' as ll;
 
 import '../../models/family_member.dart';
+import '../../models/safe_zone.dart';
 import '../../providers/family_provider.dart';
 import '../../providers/presence_provider.dart';
+import '../../providers/zone_provider.dart';
 
 /// OpenStreetMap-backed live map. Shows each family member at their last
-/// known position with a labelled pin + how long ago that fix was reported.
+/// known position with a labelled pin + accuracy halo, plus every safe
+/// zone as a tinted circle.
 class MapScreen extends ConsumerWidget {
   const MapScreen({super.key});
 
@@ -18,34 +21,63 @@ class MapScreen extends ConsumerWidget {
     final members = ref.watch(familyMembersProvider).valueOrNull ?? const [];
     final presence =
         ref.watch(familyPresenceProvider).valueOrNull ?? const {};
+    final zones = ref.watch(zonesProvider).valueOrNull ?? const [];
 
-    // Build marker list from members + their presence doc.
+    // One pin per member that has reported presence.
     final markers = <Marker>[];
+    final accuracyCircles = <CircleMarker>[];
     for (final m in members) {
       final loc = presence[m.id];
       if (loc == null) continue;
+      final point = ll.LatLng(loc.position.lat, loc.position.lng);
       markers.add(
         Marker(
-          point: ll.LatLng(loc.position.lat, loc.position.lng),
-          width: 120,
-          height: 70,
+          point: point,
+          width: 140,
+          height: 72,
           alignment: Alignment.topCenter,
           child: _MemberPin(member: m, location: loc),
         ),
       );
+      accuracyCircles.add(
+        CircleMarker(
+          point: point,
+          radius: loc.accuracyMeters.clamp(5, 500),
+          useRadiusInMeter: true,
+          color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+          borderColor:
+              Theme.of(context).colorScheme.primary.withOpacity(0.4),
+          borderStrokeWidth: 1,
+        ),
+      );
     }
 
-    // Centre the camera on the first available member (admin usually), else
-    // on Delhi so the map isn't an empty gray square the first time.
+    final zoneCircles = <CircleMarker>[];
+    for (final z in zones) {
+      if (!z.active) continue;
+      zoneCircles.add(
+        CircleMarker(
+          point: ll.LatLng(z.center.lat, z.center.lng),
+          radius: z.radiusMeters,
+          useRadiusInMeter: true,
+          color: Colors.green.withOpacity(0.1),
+          borderColor: Colors.green.shade700,
+          borderStrokeWidth: 2,
+        ),
+      );
+    }
+
     final centre = markers.isNotEmpty
         ? markers.first.point
-        : const ll.LatLng(28.6139, 77.2090);
+        : zoneCircles.isNotEmpty
+            ? zoneCircles.first.point
+            : const ll.LatLng(28.6139, 77.2090); // Delhi fallback
 
     return Scaffold(
       body: FlutterMap(
         options: MapOptions(
           initialCenter: centre,
-          initialZoom: markers.isNotEmpty ? 14 : 11,
+          initialZoom: markers.isNotEmpty ? 15 : 11,
           minZoom: 3,
           maxZoom: 18,
         ),
@@ -54,6 +86,8 @@ class MapScreen extends ConsumerWidget {
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'com.sylvie.sylvie',
           ),
+          // Zones first so pins + accuracy circles render on top.
+          CircleLayer(circles: [...zoneCircles, ...accuracyCircles]),
           MarkerLayer(markers: markers),
           if (markers.isEmpty)
             const Center(
@@ -69,6 +103,7 @@ class MapScreen extends ConsumerWidget {
                 ),
               ),
             ),
+          _ZoneLegend(zones: zones),
         ],
       ),
     );
@@ -115,5 +150,43 @@ class _MemberPin extends StatelessWidget {
     if (d.inMinutes < 60) return '${d.inMinutes}m ago';
     if (d.inHours < 24) return '${d.inHours}h ago';
     return DateFormat('MMM d').format(DateTime.now().subtract(d));
+  }
+}
+
+class _ZoneLegend extends StatelessWidget {
+  final List<SafeZone> zones;
+  const _ZoneLegend({required this.zones});
+
+  @override
+  Widget build(BuildContext context) {
+    if (zones.isEmpty) return const SizedBox.shrink();
+    return Positioned(
+      bottom: 12,
+      left: 12,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.green.withOpacity(0.3),
+                  border: Border.all(color: Colors.green.shade700, width: 2),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${zones.length} safe zone${zones.length == 1 ? '' : 's'}',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
