@@ -138,7 +138,7 @@ const Map<PhoneOem, List<_Step>> _oemSteps = {
     _Step(
       'Enable Autostart',
       'Settings → Apps → Sylvie → Autostart → ON',
-      openSetting: AppSettingsType.appSettings,
+      openSetting: AppSettingsType.settings,
     ),
     _Step(
       'Location: Allow all the time',
@@ -188,7 +188,7 @@ const Map<PhoneOem, List<_Step>> _oemSteps = {
     _Step(
       'Enable Autostart',
       'Settings → Apps → Manage apps → Sylvie → Autostart → ON',
-      openSetting: AppSettingsType.appSettings,
+      openSetting: AppSettingsType.settings,
     ),
     _Step(
       'Location: Allow all the time',
