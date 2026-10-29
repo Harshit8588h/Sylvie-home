@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/fcm_service.dart';
 import '../services/geofence_watcher.dart';
 import '../services/notification_service.dart';
 import '../services/watchdog_service.dart';
@@ -31,4 +32,8 @@ final watchdogServiceProvider = Provider<WatchdogService>((ref) {
   );
   ref.onDispose(w.stop);
   return w;
+});
+
+final fcmServiceProvider = Provider<FcmService>((ref) {
+  return FcmService(ref.watch(firestoreProvider));
 });

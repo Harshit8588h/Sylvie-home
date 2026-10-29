@@ -3,14 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/family_member.dart';
+import '../../providers/preferences_provider.dart';
 import '../../services/oem_detector.dart';
 
 /// First-run wizard that walks the user through disabling OEM battery
 /// optimizations for Sylvie. Each OEM gets its own checklist, generated
 /// from a shared data structure so adding a brand is one entry.
+///
+/// When [onDone] is omitted, the wizard marks the "battery setup done"
+/// flag in preferences and relies on AuthGate rebuilding to advance.
 class BatterySetupScreen extends ConsumerStatefulWidget {
-  final VoidCallback onDone;
-  const BatterySetupScreen({super.key, required this.onDone});
+  final VoidCallback? onDone;
+  const BatterySetupScreen({super.key, this.onDone});
 
   @override
   ConsumerState<BatterySetupScreen> createState() => _BatterySetupScreenState();
@@ -96,16 +100,21 @@ class _BatterySetupScreenState extends ConsumerState<BatterySetupScreen> {
           }),
           const SizedBox(height: 20),
           FilledButton(
-            onPressed: allDone ? widget.onDone : null,
+            onPressed: allDone ? _finish : null,
             child: Text(allDone ? 'Done — continue' : 'Finish all steps to continue'),
           ),
           TextButton(
-            onPressed: widget.onDone,
+            onPressed: _finish,
             child: const Text('Skip for now (not recommended)'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _finish() async {
+    await ref.read(batterySetupDoneProvider.notifier).markDone();
+    widget.onDone?.call();
   }
 }
 

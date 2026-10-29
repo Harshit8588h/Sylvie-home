@@ -3,18 +3,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/phone_sign_in_screen.dart';
 import '../features/home/home_shell.dart';
+import '../features/onboarding/battery_setup_screen.dart';
 import '../features/onboarding/create_or_join_screen.dart';
 import '../features/permissions/location_permissions_screen.dart';
 import '../firebase_options.dart';
 import '../providers/auth_provider.dart';
 import '../providers/family_provider.dart';
 import '../providers/location_provider.dart';
+import '../providers/preferences_provider.dart';
 
 /// Top-level router. Decides which screen to show based on:
-///   1. Is Firebase actually configured?
-///   2. Is a user signed in?
-///   3. Does the signed-in user have a family yet?
-///   4. Have they granted location permission?
+///   1. Firebase actually configured?
+///   2. User signed in?
+///   3. Does the user have a family?
+///   4. Location permission granted?
+///   5. Has the OEM battery setup wizard been completed?
 class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
 
@@ -59,13 +62,21 @@ class _PermissionGate extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final perm = ref.watch(locationPermissionProvider);
-    // We accept "while in use" as good enough to show the home shell —
-    // user can be nudged to upgrade to "always" later. Only denied/
-    // deniedForever blocks entry.
     if (perm == LocationPermissionLevel.denied ||
         perm == LocationPermissionLevel.deniedForever) {
       return const LocationPermissionsScreen();
     }
+    return const _BatteryGate();
+  }
+}
+
+class _BatteryGate extends ConsumerWidget {
+  const _BatteryGate();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final done = ref.watch(batterySetupDoneProvider);
+    if (!done) return const BatterySetupScreen();
     return const HomeShell();
   }
 }

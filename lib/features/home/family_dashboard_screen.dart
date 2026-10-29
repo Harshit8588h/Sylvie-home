@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/family_member.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
+import '../../providers/presence_provider.dart';
+import '../settings/settings_screen.dart';
 
 class FamilyDashboardScreen extends ConsumerWidget {
   const FamilyDashboardScreen({super.key});
@@ -14,6 +17,7 @@ class FamilyDashboardScreen extends ConsumerWidget {
     final family = ref.watch(currentFamilyProvider).valueOrNull;
     final members = ref.watch(familyMembersProvider).valueOrNull ?? const [];
     final codes = ref.watch(familyInviteCodesProvider).valueOrNull ?? const [];
+    final presence = ref.watch(familyPresenceProvider).valueOrNull ?? const {};
     final uid = ref.watch(currentUidProvider);
     final isAdmin = family != null && family.adminId == uid;
 
@@ -22,9 +26,11 @@ class FamilyDashboardScreen extends ConsumerWidget {
         title: Text(family?.name ?? 'Sylvie'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () => ref.read(firebaseAuthProvider).signOut(),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ),
           ),
         ],
       ),
@@ -38,9 +44,13 @@ class FamilyDashboardScreen extends ConsumerWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          ...members.map((m) => _MemberTile(member: m, isSelf: m.id == uid)),
-          const SizedBox(height: 24),
-          _NextStepsCard(),
+          ...members.map(
+            (m) => _MemberTile(
+              member: m,
+              isSelf: m.id == uid,
+              presence: presence[m.id],
+            ),
+          ),
         ],
       ),
     );
@@ -63,8 +73,7 @@ class _InviteCard extends StatelessWidget {
             Text(
               'Invite code',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color:
-                        Theme.of(context).colorScheme.onPrimaryContainer,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
                   ),
             ),
             const SizedBox(height: 8),
@@ -92,6 +101,17 @@ class _InviteCard extends StatelessWidget {
                     }
                   },
                 ),
+                IconButton(
+                  icon: const Icon(Icons.share),
+                  tooltip: 'Share',
+                  onPressed: () async {
+                    final text =
+                        'Sylvie family mein join ho: invite code $code';
+                    final uri =
+                        Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
+                    if (await canLaunchUrl(uri)) await launchUrl(uri);
+                  },
+                ),
               ],
             ),
             const SizedBox(height: 4),
@@ -109,20 +129,79 @@ class _InviteCard extends StatelessWidget {
 class _MemberTile extends StatelessWidget {
   final FamilyMember member;
   final bool isSelf;
-  const _MemberTile({required this.member, required this.isSelf});
+  final LastLocation? presence;
+  const _MemberTile({
+    required this.member,
+    required this.isSelf,
+    required this.presence,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
-        leading: CircleAvatar(child: Text(member.name.characters.first.toUpperCase())),
-        title: Text(member.name + (isSelf ? ' (you)' : '')),
-        subtitle: Text('${_relationLabel(member.relation)}  ·  ${member.phoneNumber}'),
-        trailing: member.role == FamilyRole.admin
-            ? const Chip(label: Text('Admin'), visualDensity: VisualDensity.compact)
-            : null,
+        leading: CircleAvatar(
+          child: Text(member.name.characters.first.toUpperCase()),
+        ),
+        title: Row(
+          children: [
+            Expanded(child: Text(member.name + (isSelf ? ' (you)' : ''))),
+            if (member.role == FamilyRole.admin)
+              const Chip(
+                label: Text('Admin'),
+                visualDensity: VisualDensity.compact,
+              ),
+          ],
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${_relationLabel(member.relation)}  ·  ${member.phoneNumber}'),
+            if (presence != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: _PresenceLine(location: presence!),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text('No location yet',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ),
+            if (!isSelf)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  children: [
+                    _ActionIconButton(
+                      icon: Icons.call,
+                      label: 'Call',
+                      onTap: () => _launch('tel:${member.phoneNumber}'),
+                    ),
+                    _ActionIconButton(
+                      icon: Icons.chat_bubble_outline,
+                      label: 'WhatsApp',
+                      onTap: () => _launch(
+                        'https://wa.me/${member.phoneNumber.replaceAll('+', '')}',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        isThreeLine: true,
       ),
     );
+  }
+
+  Future<void> _launch(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   static String _relationLabel(Relation r) {
@@ -147,24 +226,110 @@ class _MemberTile extends StatelessWidget {
   }
 }
 
-class _NextStepsCard extends StatelessWidget {
-  const _NextStepsCard();
+class _PresenceLine extends StatelessWidget {
+  final LastLocation location;
+  const _PresenceLine({required this.location});
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text('Aage kya aane wala hai:',
-                style: TextStyle(fontWeight: FontWeight.w600)),
-            SizedBox(height: 8),
-            Text('• Live map — sab members ki location'),
-            Text('• Safe zones (ghar + AIIMS)'),
-            Text('• Zone exit alerts + phone-offline watchdog'),
-            Text('• Per-OEM battery setup wizard'),
+    final age = DateTime.now().toUtc().difference(location.timestamp);
+    final ageStr = _fmtAge(age);
+    final bat = location.batteryPercent;
+    final isStale = age > const Duration(minutes: 15);
+    final isLowBattery = bat >= 0 && bat < 20;
+
+    final chips = <Widget>[
+      _SmallChip(
+        label: ageStr,
+        color:
+            isStale ? Colors.red : Theme.of(context).colorScheme.outlineVariant,
+      ),
+      if (bat >= 0)
+        _SmallChip(
+          label: '$bat%',
+          icon: Icons.battery_std,
+          color: isLowBattery
+              ? Colors.red
+              : Theme.of(context).colorScheme.outlineVariant,
+        ),
+      if (location.isMoving)
+        const _SmallChip(label: 'moving', icon: Icons.directions_walk),
+    ];
+
+    return Wrap(spacing: 4, runSpacing: 4, children: chips);
+  }
+
+  static String _fmtAge(Duration d) {
+    if (d.inSeconds < 60) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+    if (d.inHours < 24) return '${d.inHours}h ago';
+    return '${d.inDays}d ago';
+  }
+}
+
+class _SmallChip extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final Color? color;
+  const _SmallChip({required this.label, this.icon, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? Theme.of(context).colorScheme.outlineVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c, width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 10, color: c),
+            const SizedBox(width: 2),
+          ],
+          Text(label, style: TextStyle(fontSize: 10, color: c)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionIconButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _ActionIconButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 16,
+                color: Theme.of(context).colorScheme.onPrimaryContainer),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                )),
           ],
         ),
       ),

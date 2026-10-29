@@ -135,5 +135,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     final watchdog = ref.read(watchdogServiceProvider);
     await watchdog.start(familyId: familyId, uid: uid);
+
+    // Register FCM token on member doc — unused in Phase 4 (we rely on
+    // local notifications) but future Cloud Functions can push to killed
+    // apps without a schema change.
+    await ref
+        .read(fcmServiceProvider)
+        .registerFor(familyId: familyId, uid: uid);
   }
 }
