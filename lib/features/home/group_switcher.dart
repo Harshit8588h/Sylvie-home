@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+// hide riverpod's internal Family type so our model wins unambiguously.
+import 'package:flutter_riverpod/flutter_riverpod.dart' hide Family;
 
 import '../../models/family.dart';
 import '../../providers/family_provider.dart';
