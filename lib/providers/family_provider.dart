@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // riverpod exports a type named `Family` (used internally for provider
 // families). Hide it so our own `Family` model wins unambiguously here.
 import 'package:flutter_riverpod/flutter_riverpod.dart' hide Family;
@@ -27,15 +29,24 @@ final userGroupIdsProvider = StreamProvider<List<String>>((ref) async* {
   yield* repo.watchMembershipGroupIds(uid);
 });
 
-/// The group the user is currently viewing. Falls back to the first
-/// known membership if the persisted choice is stale or missing.
+/// The group the user is currently viewing. Prefers the validated groups
+/// list (so an admin-removed stale id in the raw membership array never
+/// surfaces as the active group) and falls back to the raw list during
+/// the brief first-load window where validation hasn't completed yet.
 final activeGroupIdProvider = Provider<String?>((ref) {
   final persisted = ref.watch(activeGroupPrefProvider);
-  final memberships =
-      ref.watch(userGroupIdsProvider).valueOrNull ?? const <String>[];
-  if (memberships.isEmpty) return null;
-  if (persisted != null && memberships.contains(persisted)) return persisted;
-  return memberships.first;
+  final validated =
+      ref.watch(userGroupsListProvider).valueOrNull ?? const <Family>[];
+  if (validated.isNotEmpty) {
+    final ids = validated.map((f) => f.id).toList();
+    if (persisted != null && ids.contains(persisted)) return persisted;
+    return ids.first;
+  }
+  // First-load fallback: raw memberships haven't been validated yet.
+  final raw = ref.watch(userGroupIdsProvider).valueOrNull ?? const <String>[];
+  if (raw.isEmpty) return null;
+  if (persisted != null && raw.contains(persisted)) return persisted;
+  return raw.first;
 });
 
 /// Legacy alias — kept so screens that reasoned about a single family id
@@ -64,18 +75,59 @@ final familyInviteCodesProvider = StreamProvider<List<String>>((ref) {
   return ref.watch(familyRepositoryProvider).watchInviteCodes(familyId);
 });
 
-/// All groups' Family docs — needed by the group switcher. Fetched as a
-/// one-shot per membership change; group names rarely change so a live
-/// stream per group isn't worth the complexity here.
+/// Validated list of groups the signed-in user actually still has a
+/// member doc in. If an admin elsewhere removed them, their raw
+/// user_memberships array still lists that group id — this provider
+/// filters it out and asynchronously prunes the stale id from their
+/// own membership doc so future reads stay consistent.
 final userGroupsListProvider = FutureProvider<List<Family>>((ref) async {
   final ids = ref.watch(userGroupIdsProvider).valueOrNull ?? const <String>[];
   if (ids.isEmpty) return const <Family>[];
   final db = ref.watch(firestoreProvider);
-  final docs = await Future.wait(
-    ids.map((id) => db.collection('families').doc(id).get()),
-  );
-  return docs
-      .where((d) => d.exists)
-      .map((d) => Family.fromJson({...d.data()!, 'id': d.id}))
-      .toList();
+  final uid = ref.watch(currentUidProvider);
+  if (uid == null) return const <Family>[];
+
+  final results = await Future.wait(ids.map((id) async {
+    try {
+      final familyDoc = await db.collection('families').doc(id).get();
+      if (!familyDoc.exists) return (id, null);
+      final memberDoc = await db
+          .collection('families')
+          .doc(id)
+          .collection('members')
+          .doc(uid)
+          .get();
+      if (!memberDoc.exists) return (id, null); // we got kicked
+      return (
+        id,
+        Family.fromJson({...familyDoc.data()!, 'id': familyDoc.id}),
+      );
+    } catch (_) {
+      // Permission denied or network blip — treat as stale rather than
+      // crashing the whole list.
+      return (id, null);
+    }
+  }));
+
+  final live = <Family>[];
+  final stale = <String>[];
+  for (final (id, fam) in results) {
+    if (fam != null) {
+      live.add(fam);
+    } else {
+      stale.add(id);
+    }
+  }
+
+  // Fire-and-forget self-prune of stale ids so we don't ask Firestore
+  // for them again on the next poll.
+  if (stale.isNotEmpty) {
+    unawaited(
+      ref
+          .read(familyRepositoryProvider)
+          .pruneMembershipGroups(uid: uid, staleGroupIds: stale),
+    );
+  }
+
+  return live;
 });

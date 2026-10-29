@@ -35,14 +35,15 @@ class WatchdogService {
       : _battery = battery ?? Battery();
 
   Future<void> start({
+    required List<String> initialGroupIds,
     required Stream<List<String>> groupIdsStream,
     required String uid,
   }) async {
     await stop();
     _uid = uid;
+    _currentGroups = initialGroupIds;
     _groupsSub = groupIdsStream.listen((ids) {
       _currentGroups = ids;
-      // Drop memos for groups the user is no longer in.
       _alertedOffline.removeWhere((k) => !ids.contains(k.split('|').first));
       _alertedBattery.removeWhere((g) => !ids.contains(g));
     });

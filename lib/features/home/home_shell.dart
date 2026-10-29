@@ -115,28 +115,36 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   Future<void> _startServices({required String uid}) async {
-    // Riverpod gives us a Stream<List<String>> of group ids via the
-    // underlying provider's stream API.
+    // Snapshot the current group ids NOW — Riverpod's provider.stream
+    // only emits future updates, so services need the initial value
+    // handed in explicitly or they stay stuck on an empty list until
+    // the next membership edit.
+    final currentIds =
+        ref.read(userGroupIdsProvider).valueOrNull ?? const <String>[];
     final groupsStream = ref.read(userGroupIdsProvider.stream);
 
     final location = ref.read(locationServiceProvider);
-    await location.start(groupIdsStream: groupsStream, uid: uid);
+    await location.start(
+      initialGroupIds: currentIds,
+      groupIdsStream: groupsStream,
+      uid: uid,
+    );
 
     final watcher = ref.read(geofenceWatcherProvider);
     await watcher.start(
       uid: uid,
+      initialGroupIds: currentIds,
       groupIdsStream: groupsStream,
       positions: location.positions,
     );
 
     final watchdog = ref.read(watchdogServiceProvider);
-    await watchdog.start(groupIdsStream: groupsStream, uid: uid);
+    await watchdog.start(
+      initialGroupIds: currentIds,
+      groupIdsStream: groupsStream,
+      uid: uid,
+    );
 
-    // FCM — register token in whichever groups the user is in right now.
-    // Group changes beyond this point rely on the token already being
-    // written when a joinFamily call ran.
-    final currentIds =
-        ref.read(userGroupIdsProvider).valueOrNull ?? const <String>[];
     await ref
         .read(fcmServiceProvider)
         .registerFor(familyIds: currentIds, uid: uid);

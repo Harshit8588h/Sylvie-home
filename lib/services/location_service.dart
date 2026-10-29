@@ -36,18 +36,23 @@ class LocationService {
 
   Stream<Position> get positions => _positions.stream;
 
-  /// Start writing presence for every group id emitted by [groupIdsStream].
+  /// Start writing presence for every group id in [initialGroupIds] plus
+  /// every update [groupIdsStream] emits. Seeding with the initial value
+  /// matters because Riverpod's provider.stream only delivers FUTURE
+  /// changes — without seeding the service would silently write to zero
+  /// groups until the next membership edit, which is why new joiners
+  /// weren't appearing on each other's maps.
   Future<void> start({
+    required List<String> initialGroupIds,
     required Stream<List<String>> groupIdsStream,
     required String uid,
   }) async {
     await stop();
     _uid = uid;
+    _currentGroups = initialGroupIds;
 
     _groupsSub = groupIdsStream.listen((ids) {
       _currentGroups = ids;
-      // Push immediately on group-list change so a newly joined group has
-      // a presence doc without waiting for the next movement.
       final pos = _lastPushed;
       if (pos != null) unawaited(_push(pos));
     });

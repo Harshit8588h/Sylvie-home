@@ -142,9 +142,10 @@ class FamilyRepository {
     await batch.commit();
   }
 
-  /// Leave a group: deletes the user's member and presence docs, removes
-  /// the group id from their membership array. Keeps the group itself —
-  /// only admin can delete the group entirely.
+  /// Leave a group: deletes the user's member and presence docs and
+  /// drops the group id from their own membership array. The last call
+  /// uses set-with-merge so it works even on an older-shape membership
+  /// doc that doesn't have a group_ids array yet.
   Future<void> leaveGroup({
     required String familyId,
     required String uid,
@@ -164,11 +165,12 @@ class FamilyRepository {
           .collection('presence')
           .doc(uid),
     );
-    batch.update(
+    batch.set(
       _db.collection('user_memberships').doc(uid),
       {
         'group_ids': FieldValue.arrayRemove([familyId]),
       },
+      SetOptions(merge: true),
     );
     await batch.commit();
   }
@@ -187,8 +189,13 @@ class FamilyRepository {
         .update({'role': asAdmin ? 'admin' : 'member'});
   }
 
-  /// Admin removes a member from the group entirely (used when kicking a
-  /// friend out of the family group, etc.).
+  /// Admin removes a member from the group entirely. We DELETE the member
+  /// and presence docs (admin has rights to both) but do NOT touch the
+  /// removed user's /user_memberships doc — Firestore rules only allow
+  /// each user to write their own membership index. The removed user's
+  /// client will discover the eviction on its next load because the
+  /// validated groups provider filters out groups where the member doc
+  /// is missing and self-prunes the stale id from the array.
   Future<void> removeMember({
     required String familyId,
     required String memberId,
@@ -208,13 +215,25 @@ class FamilyRepository {
           .collection('presence')
           .doc(memberId),
     );
-    batch.update(
-      _db.collection('user_memberships').doc(memberId),
-      {
-        'group_ids': FieldValue.arrayRemove([familyId]),
-      },
-    );
     await batch.commit();
+  }
+
+  /// Called by each user's client to drop stale group ids from their
+  /// own /user_memberships array once they've been evicted or something
+  /// got out of sync. Safe to call opportunistically.
+  Future<void> pruneMembershipGroups({
+    required String uid,
+    required List<String> staleGroupIds,
+  }) async {
+    if (staleGroupIds.isEmpty) return;
+    final ref = _db.collection('user_memberships').doc(uid);
+    try {
+      await ref.update({
+        'group_ids': FieldValue.arrayRemove(staleGroupIds),
+      });
+    } catch (_) {
+      // Doc might not exist (edge case) — fall through quietly.
+    }
   }
 
   // --- members ---

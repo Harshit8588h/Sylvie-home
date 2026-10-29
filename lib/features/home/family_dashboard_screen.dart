@@ -229,8 +229,14 @@ class _MemberTile extends ConsumerWidget {
 
   Future<void> _launch(String url) async {
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
+    // Skip canLaunchUrl — on Android it misreports false for tel: and
+    // whatsapp:// in corner cases even when the system CAN handle them.
+    // Just try to launch; failures throw PlatformException which we
+    // swallow (user sees the system "no handler" prompt instead).
+    try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // ignore
     }
   }
 

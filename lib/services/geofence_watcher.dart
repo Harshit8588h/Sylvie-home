@@ -31,12 +31,15 @@ class GeofenceWatcher {
 
   Future<void> start({
     required String uid,
+    required List<String> initialGroupIds,
     required Stream<List<String>> groupIdsStream,
     required Stream<Position> positions,
   }) async {
     await stop();
     _uid = uid;
 
+    // Seed zone subscriptions from the initial list before future updates.
+    _syncGroupSubscriptions(initialGroupIds);
     _groupsSub = groupIdsStream.listen(_syncGroupSubscriptions);
 
     _posSub = positions.listen(_evaluate);
