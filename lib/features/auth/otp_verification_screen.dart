@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,7 +18,8 @@ class OtpVerificationScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
+  ConsumerState<OtpVerificationScreen> createState() =>
+      _OtpVerificationScreenState();
 }
 
 class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
@@ -30,6 +33,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     super.dispose();
   }
 
+  /// Verifies the OTP without blocking on the Firebase SDK's returned
+  /// Future. On Realme / Oppo / Vivo the Play Integrity token exchange
+  /// often leaves signInWithCredential hanging even though the auth
+  /// session is already established, so we additionally watch
+  /// authStateChanges() and consider ourselves done the moment a user
+  /// appears. A 30-second timeout surfaces a retry message instead of a
+  /// forever-spinning dot.
   Future<void> _verify() async {
     final code = _otpController.text.trim();
     if (code.length != 6) {
@@ -42,22 +52,47 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       _error = null;
     });
 
+    final auth = ref.read(firebaseAuthProvider);
+    final credential = PhoneAuthProvider.credential(
+      verificationId: widget.verificationId,
+      smsCode: code,
+    );
+
+    // Fire the sign-in; only use its result for error surfacing. If it
+    // succeeds silently we still find out via the auth-state stream.
+    unawaited(
+      auth.signInWithCredential(credential).catchError((Object e) {
+        if (!mounted) return null;
+        setState(() {
+          _verifying = false;
+          if (e is FirebaseAuthException) {
+            _error = e.code == 'invalid-verification-code'
+                ? 'Galat OTP. Dubara check karo.'
+                : (e.message ?? 'Verification failed');
+          } else {
+            _error = e.toString();
+          }
+        });
+        return null;
+      }),
+    );
+
     try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: widget.verificationId,
-        smsCode: code,
-      );
-      await ref.read(firebaseAuthProvider).signInWithCredential(credential);
-      // authStateProvider will flip and the router will take us to the next screen.
-    } on FirebaseAuthException catch (e) {
+      await auth
+          .authStateChanges()
+          .firstWhere((u) => u != null)
+          .timeout(const Duration(seconds: 30));
+      // Signed in — AuthGate will swap in the next screen; nothing to do.
+    } on TimeoutException {
       if (mounted) {
         setState(() {
           _verifying = false;
-          _error = e.code == 'invalid-verification-code'
-              ? 'Galat OTP. Dubara check karo.'
-              : (e.message ?? 'Verification failed');
+          _error =
+              'Verification 30 sec se zyada le raha. App band karke dubara kholo — likely sign-in ho chuka hai.';
         });
       }
+    } catch (_) {
+      // Already handled by the signInWithCredential error path above.
     }
   }
 
