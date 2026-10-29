@@ -43,8 +43,11 @@ git --version
 3. First launch of Android Studio:
    - It will offer to install the Android SDK — accept
    - "Welcome to Android Studio" screen appears when done
-4. **More Actions → SDK Manager**:
-   - Tick: **Android 14 (API 34)** → Apply → accept license → wait
+
+### Case A — Welcome screen is visible (no project open)
+
+4. On the welcome screen click **More Actions → SDK Manager**:
+   - Tick: **Android 14 (API 34)** → Apply → accept license → wait (10-15 min)
    - Click the **SDK Tools** tab, tick:
      - Android SDK Command-line Tools (latest)
      - Android SDK Build-Tools 34
@@ -53,6 +56,17 @@ git --version
 5. **More Actions → Plugins**:
    - Search "Flutter" → Install → restart Android Studio when prompted
    - (This also installs the Dart plugin automatically.)
+
+### Case B — A project is already open (no "More Actions" button)
+
+This happens when Android Studio auto-opens your last project. Everything above still has to happen, just the menus live in different places:
+
+4. **SDK Manager** → top-left **hamburger icon (☰) → Tools → SDK Manager**
+   (Shortcut: `Ctrl + Alt + S` → *Appearance & Behavior → System Settings → Android SDK*)
+   - Same SDK Platforms + SDK Tools boxes as Case A
+5. **Plugins** → hamburger (☰) **→ File → Settings → Plugins** (same Ctrl+Alt+S)
+   - Marketplace tab → search "Flutter" → Install → restart
+6. If Flutter + Dart plugins already show up under the **Installed** tab, this whole step is done — skip to Section 4.
 
 ## 4. Accept SDK licenses
 
