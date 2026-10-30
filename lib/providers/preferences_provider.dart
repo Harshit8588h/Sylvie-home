@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _kBatterySetupDone = 'battery_setup_done';
 const _kActiveGroupId = 'active_group_id';
+const _kHasSignedInBefore = 'has_signed_in_before';
 
 final sharedPrefsProvider = FutureProvider<SharedPreferences>((_) async {
   return SharedPreferences.getInstance();
@@ -72,4 +73,32 @@ class ActiveGroupController extends StateNotifier<String?> {
 final activeGroupPrefProvider =
     StateNotifierProvider<ActiveGroupController, String?>(
   (ref) => ActiveGroupController(ref),
+);
+
+/// Tiny helper read synchronously at app start: tells the auth gate
+/// whether we expect a user to be restored, so it can keep showing the
+/// spinner (instead of flashing sign-in) for the time it takes Firebase
+/// to read its cache. Set true on successful OTP verify, false on
+/// explicit sign-out.
+class HasSignedInBeforeController extends StateNotifier<bool> {
+  final Ref _ref;
+  HasSignedInBeforeController(this._ref) : super(false) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await _ref.read(sharedPrefsProvider.future);
+    state = prefs.getBool(_kHasSignedInBefore) ?? false;
+  }
+
+  Future<void> set(bool value) async {
+    final prefs = await _ref.read(sharedPrefsProvider.future);
+    await prefs.setBool(_kHasSignedInBefore, value);
+    state = value;
+  }
+}
+
+final hasSignedInBeforeProvider =
+    StateNotifierProvider<HasSignedInBeforeController, bool>(
+  (ref) => HasSignedInBeforeController(ref),
 );

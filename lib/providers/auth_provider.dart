@@ -2,37 +2,55 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final firebaseAuthProvider = Provider<FirebaseAuth>((_) => FirebaseAuth.instance);
 
 /// Live stream of the signed-in Firebase user, or null when signed out.
 ///
-/// On cold start FirebaseAuth.authStateChanges() frequently emits `null`
-/// synchronously BEFORE the SDK has finished reading its persisted
-/// user from disk, which flashed the sign-in screen on every reopen.
-/// We race the stream against a 3-second timeout waiting for the first
-/// NON-null emission — if the cached user restores in that window the
-/// gate sees it directly, otherwise we treat the account as signed-out
-/// and proceed to the sign-in screen. The follow-up `yield*` keeps the
-/// stream live for subsequent sign-ins / sign-outs.
+/// On aggressive-killer OEMs (Realme / Vivo / Xiaomi) FirebaseAuth can
+/// take a surprising amount of time to read its on-disk cache after a
+/// cold start — long enough that `authStateChanges()` emits `null`
+/// first and the gate flashes the sign-in screen before the real user
+/// finally arrives. We work around it by remembering, in a plain
+/// SharedPreferences flag, whether the LAST session ended with a user
+/// signed in. If yes, we wait patiently (up to 10 s) for a non-null
+/// emission before giving up and showing sign-in; if no, we only wait
+/// a brief 2 s so first-time users don't stare at a spinner.
+///
+/// Set the flag true on successful OTP verify, false on explicit sign-out.
 final authStateProvider = StreamProvider<User?>((ref) async* {
   final auth = ref.watch(firebaseAuthProvider);
 
-  // Fast path: cached user already in memory.
+  // Fast path: cached user is already warm in memory.
   if (auth.currentUser != null) {
     yield auth.currentUser;
     yield* auth.authStateChanges();
     return;
   }
 
+  // Read the "last session was signed in" flag directly (not via
+  // Riverpod) because the Riverpod notifier is itself async.
+  bool expectedSignedIn = false;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    expectedSignedIn = prefs.getBool('has_signed_in_before') ?? false;
+  } catch (_) {
+    expectedSignedIn = false;
+  }
+
+  final waitBudget = expectedSignedIn
+      ? const Duration(seconds: 10)
+      : const Duration(seconds: 2);
+
   User? restored;
   try {
     restored = await auth
         .authStateChanges()
         .firstWhere((u) => u != null)
-        .timeout(const Duration(seconds: 3));
+        .timeout(waitBudget);
   } on TimeoutException {
-    restored = null; // genuinely signed out
+    restored = null;
   }
 
   yield restored;

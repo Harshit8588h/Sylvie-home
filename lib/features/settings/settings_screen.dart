@@ -194,6 +194,9 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
     if (ok != true) return;
+    // Clear the "was signed in" flag so the next cold start goes
+    // straight to the sign-in screen without a 10-second patient wait.
+    await ref.read(hasSignedInBeforeProvider.notifier).set(false);
     await ref.read(firebaseAuthProvider).signOut();
   }
 }

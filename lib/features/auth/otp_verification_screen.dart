@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../providers/preferences_provider.dart';
 
 class OtpVerificationScreen extends ConsumerStatefulWidget {
   final String verificationId;
@@ -82,10 +83,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
           .authStateChanges()
           .firstWhere((u) => u != null)
           .timeout(const Duration(seconds: 30));
-      // Signed in. AuthGate's home swap doesn't auto-pop routes that were
-      // pushed on top of it, so we clear the stack back to the AuthGate
-      // root ourselves — otherwise this OTP screen keeps showing on top
-      // of HomeShell with its spinner spinning forever.
+      // Remember we're signed in so the auth gate waits patiently for
+      // cache restore on the next cold start instead of flashing sign-in.
+      await ref.read(hasSignedInBeforeProvider.notifier).set(true);
+      // AuthGate's home swap doesn't auto-pop routes that were pushed
+      // on top of it, so we clear the stack back to the AuthGate root
+      // ourselves — otherwise this OTP screen keeps showing on top of
+      // HomeShell with its spinner spinning forever.
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
