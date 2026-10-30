@@ -28,8 +28,18 @@ class CreateZoneScreen extends ConsumerStatefulWidget {
 
 class _CreateZoneScreenState extends ConsumerState<CreateZoneScreen> {
   static const _minRadius = 50.0;
-  static const _maxRadius = 50000.0;
-  static const _radiusPresets = <double>[100, 500, 1000, 5000, 10000, 25000, 50000];
+  static const _maxRadius = 500000.0; // 500 km upper bound
+  static const _radiusPresets = <double>[
+    100,
+    500,
+    1000,
+    5000,
+    10000,
+    50000,
+    100000,
+    250000,
+    500000,
+  ];
 
   final _nameController = TextEditingController(text: 'Ghar');
   final _searchController = TextEditingController();
